@@ -5,18 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rise Daily Check-In</title>
     <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 </head>
 <body>
 
-    <div class="container">
-        <h1>🌞 Rise Daily Check-In</h1>
-        
-        <p id="status">Connect your wallet to start.</p>
+    <div class="background-glow"></div>
 
-        <button id="connectBtn">Connect Wallet</button>
-        <button id="checkInBtn" disabled>Check In Now</button>
+    <div class="main-card">
+        <header>
+            <div class="logo">☀️ Rise<span class="highlight">Daily</span></div>
+            <div id="walletBadge" class="wallet-badge hidden">Not Connected</div>
+        </header>
 
-        <p id="timer" class="timer-text"></p>
+        <div class="content">
+            
+            <div class="streak-container">
+                <div class="fire-icon">🔥</div>
+                <h1 id="streakDisplay">0</h1>
+                <p class="subtitle">Day Streak</p>
+            </div>
+
+            <p id="timer" class="timer-text">Connect wallet to start checking in</p>
+            <p id="status" class="status-text"></p>
+
+            <div class="button-group">
+                <button id="connectBtn" class="btn-primary">Connect Wallet</button>
+                <button id="checkInBtn" class="btn-success hidden" disabled>Check In</button>
+            </div>
+
+        </div>
+
+        <div class="leaderboard-section">
+            <h3>🏆 Top Check-Ins</h3>
+            <div class="leaderboard-header">
+                <span>Rank</span>
+                <span>User</span>
+                <span>Streak</span>
+            </div>
+            <ul id="leaderboardList" class="leaderboard-list">
+                <li class="loading-text">Connect wallet to view...</li>
+            </ul>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
