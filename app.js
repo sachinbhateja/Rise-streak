@@ -1,12 +1,13 @@
 // 1. Configuration
-const CONTRACT_ADDRESS = "0xEAEe20a539C550515e22BCaD3eD5e0832b59d1d6"; // Your specific address
-const RISE_CHAIN_ID = 11155931; // Rise Testnet Chain ID (Decimal)
+const CONTRACT_ADDRESS = "0x149bc738F6fb650d68D7F85daD1b78Dae88cA2dd"; // Your NEW CA
+const RISE_CHAIN_ID = 11155931;
 const RISE_RPC_URL = "https://testnet.riselabs.xyz";
 const RISE_EXPLORER = "https://testnet-explorer.risechain.com";
 
 const ABI = [
     "function checkIn() external",
-    "function lastCheckIn(address) view returns (uint256)"
+    "function getUserData(address) view returns (uint256, uint256)", // returns (lastCheckIn, streak)
+    "function getLeaderboard() view returns (address[], uint256[])"
 ];
 
 // 2. DOM Elements
@@ -14,47 +15,42 @@ const connectBtn = document.getElementById("connectBtn");
 const checkInBtn = document.getElementById("checkInBtn");
 const statusText = document.getElementById("status");
 const timerText = document.getElementById("timer");
+const streakDisplay = document.getElementById("streakDisplay");
+const leaderboardList = document.getElementById("leaderboardList");
+const walletBadge = document.getElementById("walletBadge");
 
-// 3. Global Variables
 let provider, signer, contract;
 let countdownInterval;
 
-// 4. Connect Wallet Function
+// 3. Connect Wallet
 async function connectWallet() {
     if (window.ethereum) {
         try {
-            // Request account access
             await window.ethereum.request({ method: "eth_requestAccounts" });
-            
-            // Initialize Ethers provider
             provider = new ethers.BrowserProvider(window.ethereum);
             signer = await provider.getSigner();
 
-            // --- AUTO NETWORK SWITCH START ---
+            // Auto Network Switch
             const network = await provider.getNetwork();
             if (Number(network.chainId) !== RISE_CHAIN_ID) {
-                try {
-                    await switchToRiseNetwork();
-                    // Re-initialize provider after switch to be safe
-                    provider = new ethers.BrowserProvider(window.ethereum);
-                    signer = await provider.getSigner();
-                } catch (switchError) {
-                    console.error("Failed to switch network:", switchError);
-                    statusText.innerText = "Please switch to Rise Testnet manually.";
-                    return;
-                }
+                await switchToRiseNetwork();
+                provider = new ethers.BrowserProvider(window.ethereum);
+                signer = await provider.getSigner();
             }
-            // --- AUTO NETWORK SWITCH END ---
 
-            // Initialize Contract
             contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
-
             const address = await signer.getAddress();
-            statusText.innerText = "Connected: " + address.substring(0, 6) + "...";
-            connectBtn.style.display = "none";
+            
+            // Update UI for connection
+            walletBadge.innerText = address.substring(0, 6) + "..." + address.substring(38);
+            walletBadge.classList.remove("hidden");
+            connectBtn.classList.add("hidden");
+            checkInBtn.classList.remove("hidden");
+            statusText.innerText = "Wallet Connected";
 
-            // Check if user can check in
-            await checkStatus();
+            // Load Data
+            await loadUserData();
+            await loadLeaderboard();
 
         } catch (error) {
             console.error(error);
@@ -65,48 +61,17 @@ async function connectWallet() {
     }
 }
 
-// 5. Network Switcher Logic
-async function switchToRiseNetwork() {
-    const chainIdHex = "0x" + RISE_CHAIN_ID.toString(16); // Convert 11155931 to Hex
+// 4. Load User Streak & Cooldown
+async function loadUserData() {
+    if (!contract) return;
+    const address = await signer.getAddress();
     
     try {
-        await window.ethereum.request({
-            method: "wallet_switchEthereumChain",
-            params: [{ chainId: chainIdHex }],
-        });
-    } catch (error) {
-        // This error code 4902 means the chain has not been added to MetaMask
-        if (error.code === 4902) {
-            await window.ethereum.request({
-                method: "wallet_addEthereumChain",
-                params: [{
-                    chainId: chainIdHex,
-                    chainName: "Rise Testnet",
-                    rpcUrls: [RISE_RPC_URL],
-                    nativeCurrency: {
-                        name: "ETH",
-                        symbol: "ETH",
-                        decimals: 18
-                    },
-                    blockExplorerUrls: [RISE_EXPLORER]
-                }],
-            });
-        } else {
-            throw error;
-        }
-    }
-}
-
-// 6. Check User Status (Cooldown Logic)
-async function checkStatus() {
-    if (!contract) return;
-
-    try {
-        const address = await signer.getAddress();
-        const lastCheckIn = await contract.lastCheckIn(address);
+        const [lastCheckIn, streak] = await contract.getUserData(address);
         
-        // Convert timestamp to milliseconds (Solidity returns seconds)
-        // Add 24 hours (86400 seconds)
+        // Animate streak number
+        streakDisplay.innerText = streak.toString();
+
         const nextCheckInTime = (Number(lastCheckIn) + 86400) * 1000;
         const now = Date.now();
 
@@ -116,16 +81,64 @@ async function checkStatus() {
             disableButton();
             startCountdown(nextCheckInTime);
         }
-
-    } catch (error) {
-        console.error("Error fetching status:", error);
+    } catch (e) {
+        console.error("New user or error:", e);
+        // Default to 0 if new user
+        streakDisplay.innerText = "0";
+        enableButton();
     }
 }
 
-// 7. Countdown Timer
+// 5. Load Leaderboard
+async function loadLeaderboard() {
+    if (!contract) return;
+    
+    try {
+        const [users, streaks] = await contract.getLeaderboard();
+        
+        let leaderboardData = [];
+        for(let i = 0; i < users.length; i++) {
+            leaderboardData.push({
+                address: users[i],
+                streak: Number(streaks[i])
+            });
+        }
+
+        leaderboardData.sort((a, b) => b.streak - a.streak);
+        leaderboardList.innerHTML = "";
+
+        if(leaderboardData.length === 0) {
+            leaderboardList.innerHTML = "<li style='justify-content:center'>No check-ins yet!</li>";
+            return;
+        }
+
+        leaderboardData.slice(0, 10).forEach((user, index) => {
+            const li = document.createElement("li");
+            const shortAddr = user.address.substring(0, 6) + "...";
+            
+            let rankClass = "";
+            let rankIcon = `#${index + 1}`;
+            
+            if (index === 0) { rankIcon = "🥇"; rankClass = "rank-gold"; }
+            if (index === 1) { rankIcon = "🥈"; rankClass = "rank-silver"; }
+            if (index === 2) { rankIcon = "🥉"; rankClass = "rank-bronze"; }
+
+            li.innerHTML = `
+                <span class="${rankClass}" style="width:30px; font-weight:bold;">${rankIcon}</span>
+                <span style="flex-grow:1; margin-left:10px;">${shortAddr}</span>
+                <span class="streak-badge">${user.streak} 🔥</span>
+            `;
+            leaderboardList.appendChild(li);
+        });
+
+    } catch (error) {
+        console.error("Leaderboard error:", error);
+    }
+}
+
+// 6. Helpers
 function startCountdown(targetTime) {
     if (countdownInterval) clearInterval(countdownInterval);
-
     countdownInterval = setInterval(() => {
         const now = Date.now();
         const distance = targetTime - now;
@@ -140,48 +153,71 @@ function startCountdown(targetTime) {
         const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((distance % (1000 * 60)) / 1000);
 
-        timerText.innerText = `Next check-in: ${hours}h ${minutes}m ${seconds}s`;
+        timerText.innerText = `Wait: ${hours}h ${minutes}m ${seconds}s`;
+        timerText.style.color = "#fbbf24";
     }, 1000);
 }
 
-// 8. UI Helpers
 function enableButton() {
     checkInBtn.disabled = false;
     checkInBtn.innerText = "Check In Now";
-    timerText.innerText = "You are ready to check in! 🚀";
-    timerText.style.color = "#10b981"; // Green
+    timerText.innerText = "You are ready!";
+    timerText.style.color = "#10b981";
     if (countdownInterval) clearInterval(countdownInterval);
 }
 
 function disableButton() {
     checkInBtn.disabled = true;
-    checkInBtn.innerText = "Come back later";
-    timerText.style.color = "#facc15"; // Yellow
+    checkInBtn.innerText = "Cooldown Active";
+    timerText.style.color = "#fbbf24";
 }
 
-// 9. Execute Check-In Transaction
-async function handleCheckIn() {
+async function switchToRiseNetwork() {
+    const chainIdHex = "0x" + RISE_CHAIN_ID.toString(16);
     try {
-        statusText.innerText = "Please confirm transaction...";
-        
-        const tx = await contract.checkIn();
-        statusText.innerText = "Waiting for confirmation...";
-        
-        await tx.wait();
-        
-        statusText.innerText = "✅ Checked In!";
-        await checkStatus(); // Restart timer immediately
-        
+        await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: chainIdHex }],
+        });
     } catch (error) {
-        console.error("Error:", error);
-        if (error.reason && error.reason.includes("Come back tomorrow")) {
-            statusText.innerText = "⏳ Cooldown active.";
-        } else {
-            statusText.innerText = "❌ Transaction Failed.";
+        if (error.code === 4902) {
+            await window.ethereum.request({
+                method: "wallet_addEthereumChain",
+                params: [{
+                    chainId: chainIdHex,
+                    chainName: "Rise Testnet",
+                    rpcUrls: [RISE_RPC_URL],
+                    nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+                    blockExplorerUrls: [RISE_EXPLORER]
+                }],
+            });
         }
     }
 }
 
-// 10. Event Listeners
+// 7. Check In Action
+async function handleCheckIn() {
+    try {
+        statusText.innerText = "Confirm transaction in wallet...";
+        const tx = await contract.checkIn();
+        
+        statusText.innerText = "Transaction sent... waiting...";
+        checkInBtn.disabled = true;
+        checkInBtn.innerText = "Processing...";
+        
+        await tx.wait();
+        
+        statusText.innerText = "✅ Checked In Successfully!";
+        await loadUserData();
+        await loadLeaderboard();
+        
+    } catch (error) {
+        console.error("Error:", error);
+        statusText.innerText = "Transaction Failed.";
+        checkInBtn.disabled = false;
+        checkInBtn.innerText = "Check In Now";
+    }
+}
+
 connectBtn.addEventListener("click", connectWallet);
 checkInBtn.addEventListener("click", handleCheckIn);
